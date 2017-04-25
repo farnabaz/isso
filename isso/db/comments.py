@@ -27,42 +27,42 @@ class Comments:
         self.db = db
         self.db.execute([
             'CREATE TABLE IF NOT EXISTS comments (',
-            '    tid REFERENCES threads(id), id INTEGER PRIMARY KEY, parent INTEGER,',
-            '    created FLOAT NOT NULL, modified FLOAT, mode INTEGER, remote_addr VARCHAR,',
-            '    text VARCHAR, author VARCHAR, email VARCHAR, website VARCHAR,',
-            '    likes INTEGER DEFAULT 0, dislikes INTEGER DEFAULT 0, voters BLOB NOT NULL);'])
+            '    tid integer(11) UNSIGNED, id INTEGER(11) UNSIGNED AUTO_INCREMENT, parent INTEGER,',
+            '    created DOUBLE NOT NULL, modified DOUBLE, mode INTEGER, remote_addr VARCHAR(64),',
+            '    text TEXT, author VARCHAR(256), email VARCHAR(256), website VARCHAR(256),',
+            '    likes INTEGER DEFAULT 0, dislikes INTEGER DEFAULT 0, voters BLOB NOT NULL,',
+            ' PRIMARY KEY(`id`),',
+            ' FOREIGN KEY (tid) REFERENCES threads(id)',
+            ');'])
 
     def add(self, uri, c):
         """
         Add new comment to DB and return a mapping of :attribute:`fields` and
         database values.
         """
-
         if c.get("parent") is not None:
             ref = self.get(c["parent"])
             if ref.get("parent") is not None:
                 c["parent"] = ref["parent"]
-
-        self.db.execute([
+        cur = self.db.execute([
             'INSERT INTO comments (',
             '    tid, parent,'
             '    created, modified, mode, remote_addr,',
             '    text, author, email, website, voters )',
             'SELECT',
-            '    threads.id, ?,',
-            '    ?, ?, ?, ?,',
-            '    ?, ?, ?, ?, ?',
-            'FROM threads WHERE threads.uri = ?;'], (
+            '    threads.id, %s,',
+            '    %s, %s, %s, %s,',
+            '    %s, %s, %s, %s, %s',
+            'FROM threads WHERE threads.uri = %s;'], (
             c.get('parent'),
             c.get('created') or time.time(), None, c["mode"], c['remote_addr'],
             c['text'], c.get('author'), c.get('email'), c.get('website'), buffer(
                 Bloomfilter(iterable=[c['remote_addr']]).array),
             uri)
         )
-
         return dict(zip(Comments.fields, self.db.execute(
-            'SELECT *, MAX(c.id) FROM comments AS c INNER JOIN threads ON threads.uri = ?',
-            (uri, )).fetchone()))
+            'SELECT * FROM comments WHERE id = %s',
+            (cur.lastrowid, )).fetchone()))
 
     def activate(self, id):
         """
@@ -71,7 +71,7 @@ class Comments:
         self.db.execute([
             'UPDATE comments SET',
             '    mode=1',
-            'WHERE id=? AND mode=2'], (id, ))
+            'WHERE id=%s AND mode=2'], (id, ))
 
     def update(self, id, data):
         """
@@ -80,8 +80,8 @@ class Comments:
         """
         self.db.execute([
             'UPDATE comments SET',
-                ','.join(key + '=' + '?' for key in data),
-            'WHERE id=?;'],
+                ','.join(key + '=' + '%s' for key in data),
+            'WHERE id=%s;'],
             list(data.values()) + [id])
 
         return self.get(id)
@@ -91,7 +91,7 @@ class Comments:
         Search for comment :param:`id` and return a mapping of :attr:`fields`
         and values.
         """
-        rv = self.db.execute('SELECT * FROM comments WHERE id=?', (id, )).fetchone()
+        rv = self.db.execute('SELECT * FROM comments WHERE id=%s', (id, )).fetchone()
         if rv:
             return dict(zip(Comments.fields, rv))
 
@@ -102,8 +102,8 @@ class Comments:
         Return comments for :param:`uri` with :param:`mode`.
         """
         sql = [ 'SELECT comments.* FROM comments INNER JOIN threads ON',
-                '    threads.uri=? AND comments.tid=threads.id AND (? | comments.mode) = ?',
-                '    AND comments.created>?']
+                '    threads.uri= %s AND comments.tid=threads.id AND (%s | comments.mode) = %s',
+                '    AND comments.created > %s']
 
         sql_args = [uri, mode, mode, after]
 
@@ -111,7 +111,7 @@ class Comments:
             if parent is None:
                 sql.append('AND comments.parent IS NULL')
             else:
-                sql.append('AND comments.parent=?')
+                sql.append('AND comments.parent = %s')
                 sql_args.append(parent)
 
         # custom sanitization
@@ -122,7 +122,7 @@ class Comments:
         sql.append(' ASC')
 
         if limit:
-            sql.append('LIMIT ?')
+            sql.append('LIMIT %s')
             sql_args.append(limit)
 
         rv = self.db.execute(sql, sql_args).fetchall()
@@ -155,17 +155,17 @@ class Comments:
         In the second case this comment can be safely removed without any side
         effects."""
 
-        refs = self.db.execute('SELECT * FROM comments WHERE parent=?', (id, )).fetchone()
+        refs = self.db.execute('SELECT * FROM comments WHERE parent=%s', (id, )).fetchone()
 
         if refs is None:
-            self.db.execute('DELETE FROM comments WHERE id=?', (id, ))
-            self._remove_stale()
+            self.db.execute('DELETE FROM comments WHERE id=%s', (id, ))
+            # self._remove_stale()
             return None
 
-        self.db.execute('UPDATE comments SET text=? WHERE id=?', ('', id))
-        self.db.execute('UPDATE comments SET mode=? WHERE id=?', (4, id))
+        self.db.execute('UPDATE comments SET text=%s WHERE id=%s', ('', id))
+        self.db.execute('UPDATE comments SET mode=%s WHERE id=%s', (4, id))
         for field in ('author', 'website'):
-            self.db.execute('UPDATE comments SET %s=? WHERE id=?' % field, (None, id))
+            self.db.execute('UPDATE comments SET %s=%s WHERE id=%s' % field, (None, id))
 
         self._remove_stale()
         return self.get(id)
@@ -176,7 +176,7 @@ class Comments:
         same ip address are ignored as well)."""
 
         rv = self.db.execute(
-            'SELECT likes, dislikes, voters FROM comments WHERE id=?', (id, )) \
+            'SELECT likes, dislikes, voters FROM comments WHERE id=%s', (id, )) \
             .fetchone()
 
         if rv is None:
@@ -194,8 +194,8 @@ class Comments:
         self.db.execute([
             'UPDATE comments SET',
             '    likes = likes + 1,' if upvote else 'dislikes = dislikes + 1,',
-            '    voters = ?'
-            'WHERE id=?;'], (buffer(bf.array), id))
+            '    voters = %s'
+            'WHERE id=%s;'], (buffer(bf.array), id))
 
         if upvote:
             return {'likes': likes + 1, 'dislikes': dislikes}
@@ -208,12 +208,12 @@ class Comments:
 
         sql = ['SELECT comments.parent,count(*)',
                'FROM comments INNER JOIN threads ON',
-               '   threads.uri=? AND comments.tid=threads.id AND',
-               '   (? | comments.mode = ?) AND',
-               '   comments.created > ?',
+               '   threads.uri = %s AND comments.tid=threads.id AND',
+               '   (%s | comments.mode = %s) AND',
+               '   comments.created > %s',
                'GROUP BY comments.parent']
 
-        return dict(self.db.execute(sql, [url, mode, mode, after]).fetchall())
+        return dict(self.db.execute(sql, (url, mode, mode, after)).fetchall())
 
     def count(self, *urls):
         """
@@ -233,6 +233,6 @@ class Comments:
         Remove comments older than :param:`delta`.
         """
         self.db.execute([
-            'DELETE FROM comments WHERE mode = 2 AND ? - created > ?;'
+            'DELETE FROM comments WHERE mode = 2 AND %s - created > %s;'
         ], (time.time(), delta))
         self._remove_stale()

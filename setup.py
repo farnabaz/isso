@@ -35,7 +35,7 @@ setup(
     install_requires=requires,
     extras_require={
         ':python_version=="2.6"': ['argparse', 'ordereddict'],
-        ':python_version=="2.6" or python_version=="2.7"': ['ipaddr>=2.1', 'configparser', 'werkzeug>=0.8'],
+        ':python_version=="2.6" or python_version=="2.7"': ['ipaddr>=2.1', 'mysql-python', 'configparser', 'werkzeug>=0.8'],
         ':python_version!="2.6" and python_version!="2.7"': ['werkzeug>=0.9']
     },
     entry_points={

@@ -17,6 +17,9 @@ from isso.db.spam import Guard
 from isso.db.preferences import Preferences
 
 
+import MySQLdb
+
+
 class SQLite3:
     """DB-dependend wrapper around SQLite3.
 
@@ -30,36 +33,28 @@ class SQLite3:
 
         self.path = os.path.expanduser(path)
         self.conf = conf
+        self.host = conf.get('mysql', 'host')
+        self.user = conf.get('mysql', 'user')
+        self.passwd = conf.get('mysql', 'passwd')
+        self.db = conf.get('mysql', 'db')
 
-        rv = self.execute([
-            "SELECT name FROM sqlite_master"
-            "   WHERE type='table' AND name IN ('threads', 'comments', 'preferences')"]
-        ).fetchone()
+        rv = None
 
         self.preferences = Preferences(self)
         self.threads = Threads(self)
         self.comments = Comments(self)
         self.guard = Guard(self)
 
-        if rv is None:
-            self.execute("PRAGMA user_version = %i" % SQLite3.MAX_VERSION)
-        else:
-            self.migrate(to=SQLite3.MAX_VERSION)
-
-        self.execute([
-            'CREATE TRIGGER IF NOT EXISTS remove_stale_threads',
-            'AFTER DELETE ON comments',
-            'BEGIN',
-            '    DELETE FROM threads WHERE id NOT IN (SELECT tid FROM comments);',
-            'END'])
 
     def execute(self, sql, args=()):
 
         if isinstance(sql, (list, tuple)):
             sql = ' '.join(sql)
 
-        with sqlite3.connect(self.path) as con:
-            return con.execute(sql, args)
+        with MySQLdb.connect(host=self.host, user=self.user, passwd=self.passwd,
+                             db=self.db, charset='utf8') as cur:
+            cur.execute(sql, args)
+            return cur;
 
     @property
     def version(self):
